@@ -64,10 +64,9 @@ def extract_coordinates(gps_info):
     return latitude, longitude
 
 
-def get_image_files(folder):
-    """递归获取所有名为'人工举证照片'文件夹内的图片文件"""
+def get_image_files(folder, target_folder_name):
+    """递归获取指定名称文件夹内的图片文件"""
     image_files = []
-    target_folder_name = "人工举证照片"
     
     for root, dirs, files in os.walk(folder):
         if os.path.basename(root) == target_folder_name:
@@ -79,13 +78,13 @@ def get_image_files(folder):
     return image_files
 
 
-def process_images(folder, output_file, status_callback, progress_callback):
+def process_images(folder, output_file, folder_name, status_callback, progress_callback):
     """处理图片并导出CSV"""
-    image_files = get_image_files(folder)
+    image_files = get_image_files(folder, folder_name)
     total = len(image_files)
     
     if total == 0:
-        status_callback("未找到名为'人工举证照片'文件夹内的图片文件")
+        status_callback(f"未找到名为'{folder_name}'文件夹内的图片文件")
         return
     
     status_callback(f"找到 {total} 张图片，开始处理...")
@@ -98,7 +97,7 @@ def process_images(folder, output_file, status_callback, progress_callback):
             gps_info = get_gps_info(exif_data)
             latitude, longitude = extract_coordinates(gps_info)
             
-            filename = os.path.basename(image_path)
+            filename = os.path.splitext(os.path.basename(image_path))[0]
             results.append({
                 'filename': filename,
                 'latitude': latitude if latitude is not None else '',
@@ -110,7 +109,7 @@ def process_images(folder, output_file, status_callback, progress_callback):
             
         except Exception as e:
             results.append({
-                'filename': os.path.basename(image_path),
+                'filename': os.path.splitext(os.path.basename(image_path))[0],
                 'latitude': '',
                 'longitude': ''
             })
@@ -127,15 +126,74 @@ def process_images(folder, output_file, status_callback, progress_callback):
         status_callback(f"保存文件时出错: {str(e)}")
 
 
+def process_all_images(folder, status_callback, progress_callback):
+    """处理所有照片文件夹并导出两个CSV文件"""
+    folder_configs = [
+        ("人工举证照片", "人工举证照片坐标信息.csv"),
+        ("无人机举证照片", "无人机举证照片坐标信息.csv")
+    ]
+    
+    all_results = []
+    
+    for folder_name, csv_filename in folder_configs:
+        image_files = get_image_files(folder, folder_name)
+        total = len(image_files)
+        
+        if total == 0:
+            status_callback(f"未找到名为'{folder_name}'文件夹内的图片文件")
+            continue
+        
+        status_callback(f"找到 {total} 张{folder_name}图片，开始处理...")
+        
+        results = []
+        for i, image_path in enumerate(image_files):
+            try:
+                image = Image.open(image_path)
+                exif_data = get_exif_data(image)
+                gps_info = get_gps_info(exif_data)
+                latitude, longitude = extract_coordinates(gps_info)
+                
+                filename = os.path.splitext(os.path.basename(image_path))[0]
+                results.append({
+                    'filename': filename,
+                    'latitude': latitude if latitude is not None else '',
+                    'longitude': longitude if longitude is not None else ''
+                })
+                
+                progress_callback((i + 1) / total * 100)
+                status_callback(f"正在处理 {folder_name}: {filename} ({i + 1}/{total})")
+                
+            except Exception as e:
+                results.append({
+                    'filename': os.path.splitext(os.path.basename(image_path))[0],
+                    'latitude': '',
+                    'longitude': ''
+                })
+        
+        output_file = os.path.join(folder, csv_filename)
+        try:
+            with open(output_file, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                fieldnames = ['filename', 'latitude', 'longitude']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(results)
+            
+            status_callback(f"完成！已保存到: {output_file}")
+            all_results.append((folder_name, output_file))
+        except Exception as e:
+            status_callback(f"保存文件时出错: {str(e)}")
+    
+    return all_results
+
+
 class PhotoGPSExtractor:
     def __init__(self, root):
         self.root = root
         self.root.title("照片GPS信息提取工具")
-        self.root.geometry("550x320")
-        self.root.minsize(450, 280)
+        self.root.geometry("550x280")
+        self.root.minsize(450, 240)
         
         self.folder_path = tk.StringVar()
-        self.output_path = tk.StringVar()
         
         self.create_widgets()
     
@@ -150,41 +208,23 @@ class PhotoGPSExtractor:
         ttk.Button(folder_frame, text="浏览...", command=self.browse_folder).grid(row=0, column=1)
         folder_frame.columnconfigure(0, weight=1)
         
-        ttk.Label(main_frame, text="输出文件:").grid(row=2, column=0, sticky=tk.W, pady=(0, 5))
-        output_frame = ttk.Frame(main_frame)
-        output_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        ttk.Entry(output_frame, textvariable=self.output_path).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
-        ttk.Button(output_frame, text="浏览...", command=self.browse_output).grid(row=0, column=1)
-        output_frame.columnconfigure(0, weight=1)
-        
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(main_frame, variable=self.progress_var, maximum=100)
-        self.progress_bar.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        self.progress_bar.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         
-        self.status_label = ttk.Label(main_frame, text="请选择包含'人工举证照片'文件夹的目录", wraplength=500)
-        self.status_label.grid(row=5, column=0, sticky=tk.W, pady=(0, 10))
+        self.status_label = ttk.Label(main_frame, text="请选择包含'人工举证照片'和'无人机举证照片'文件夹的目录", wraplength=500)
+        self.status_label.grid(row=3, column=0, sticky=tk.W, pady=(0, 10))
         
-        ttk.Button(main_frame, text="开始提取", command=self.start_processing).grid(row=6, column=0, pady=(10, 0))
+        ttk.Button(main_frame, text="开始提取", command=self.start_processing).grid(row=4, column=0, pady=(10, 0))
         
         main_frame.columnconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
     
     def browse_folder(self):
-        folder = filedialog.askdirectory(title="选择包含'人工举证照片'文件夹的目录")
+        folder = filedialog.askdirectory(title="选择包含照片文件夹的目录")
         if folder:
             self.folder_path.set(folder)
-            output_file = os.path.join(folder, "gps_coordinates.csv")
-            self.output_path.set(output_file)
-    
-    def browse_output(self):
-        file = filedialog.asksaveasfilename(
-            title="保存CSV文件",
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
-        )
-        if file:
-            self.output_path.set(file)
     
     def update_status(self, message):
         self.status_label.config(text=message)
@@ -196,19 +236,20 @@ class PhotoGPSExtractor:
     
     def start_processing(self):
         folder = self.folder_path.get()
-        output = self.output_path.get()
         
         if not folder:
             messagebox.showwarning("警告", "请选择文件夹")
             return
         
-        if not output:
-            messagebox.showwarning("警告", "请选择输出文件")
-            return
-        
         def run_processing():
-            process_images(folder, output, self.update_status, self.update_progress)
-            self.root.after(0, lambda: messagebox.showinfo("完成", "GPS信息提取完成！"))
+            results = process_all_images(folder, self.update_status, self.update_progress)
+            if results:
+                msg = "GPS信息提取完成！\n\n"
+                for folder_name, output_file in results:
+                    msg += f"• {folder_name}: {os.path.basename(output_file)}\n"
+                self.root.after(0, lambda: messagebox.showinfo("完成", msg))
+            else:
+                self.root.after(0, lambda: messagebox.showwarning("警告", "未找到任何照片文件夹"))
         
         thread = threading.Thread(target=run_processing)
         thread.daemon = True
