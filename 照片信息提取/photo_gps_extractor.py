@@ -1,4 +1,5 @@
 import os
+import sys
 import csv
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -260,3 +261,8 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = PhotoGPSExtractor(root)
     root.mainloop()
+    
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    log_dir = os.path.join(exe_dir, "log")
+    if os.path.isdir(log_dir) and not os.listdir(log_dir):
+        os.rmdir(log_dir)
