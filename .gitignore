@@ -42,3 +42,6 @@ cover/
 env/
 venv/
 ENV/
+
+# 照片文件夹
+照片信息提取/pic/
