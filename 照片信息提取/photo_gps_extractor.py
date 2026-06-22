@@ -65,6 +65,29 @@ def extract_coordinates(gps_info):
     return latitude, longitude
 
 
+def extract_azimuth(gps_info):
+    """提取拍摄方位角（GPSImgDirection）
+
+    返回值为度数，0°=正北，顺时针增加。
+    如果照片不含方位角信息则返回 None。
+    """
+    if 'GPSImgDirection' not in gps_info:
+        return None
+
+    direction = gps_info['GPSImgDirection']
+
+    # IFDRational 类型需要做除法
+    if isinstance(direction, tuple):
+        if direction[1] == 0:
+            return None
+        return round(float(direction[0]) / float(direction[1]), 2)
+
+    try:
+        return round(float(direction), 2)
+    except (TypeError, ValueError):
+        return None
+
+
 def get_image_files(folder, target_folder_name):
     """递归获取指定名称文件夹内的图片文件"""
     image_files = []
@@ -97,12 +120,14 @@ def process_images(folder, output_file, folder_name, status_callback, progress_c
             exif_data = get_exif_data(image)
             gps_info = get_gps_info(exif_data)
             latitude, longitude = extract_coordinates(gps_info)
-            
+            azimuth = extract_azimuth(gps_info)
+
             filename = os.path.splitext(os.path.basename(image_path))[0]
             results.append({
                 'filename': filename,
                 'latitude': latitude if latitude is not None else '',
-                'longitude': longitude if longitude is not None else ''
+                'longitude': longitude if longitude is not None else '',
+                'azimuth': azimuth if azimuth is not None else ''
             })
             
             progress_callback((i + 1) / total * 100)
@@ -112,12 +137,13 @@ def process_images(folder, output_file, folder_name, status_callback, progress_c
             results.append({
                 'filename': os.path.splitext(os.path.basename(image_path))[0],
                 'latitude': '',
-                'longitude': ''
+                'longitude': '',
+                'azimuth': ''
             })
-    
+
     try:
         with open(output_file, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            fieldnames = ['filename', 'latitude', 'longitude']
+            fieldnames = ['filename', 'latitude', 'longitude', 'azimuth']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(results)
@@ -153,12 +179,14 @@ def process_all_images(folder, status_callback, progress_callback):
                 exif_data = get_exif_data(image)
                 gps_info = get_gps_info(exif_data)
                 latitude, longitude = extract_coordinates(gps_info)
-                
+                azimuth = extract_azimuth(gps_info)
+
                 filename = os.path.splitext(os.path.basename(image_path))[0]
                 results.append({
                     'filename': filename,
                     'latitude': latitude if latitude is not None else '',
-                    'longitude': longitude if longitude is not None else ''
+                    'longitude': longitude if longitude is not None else '',
+                    'azimuth': azimuth if azimuth is not None else ''
                 })
                 
                 progress_callback((i + 1) / total * 100)
@@ -168,13 +196,14 @@ def process_all_images(folder, status_callback, progress_callback):
                 results.append({
                     'filename': os.path.splitext(os.path.basename(image_path))[0],
                     'latitude': '',
-                    'longitude': ''
+                    'longitude': '',
+                    'azimuth': ''
                 })
-        
+
         output_file = os.path.join(folder, csv_filename)
         try:
             with open(output_file, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                fieldnames = ['filename', 'latitude', 'longitude']
+                fieldnames = ['filename', 'latitude', 'longitude', 'azimuth']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(results)
