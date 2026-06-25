@@ -45,3 +45,4 @@ ENV/
 
 # 照片文件夹
 照片信息提取/pic/
+test_photos/

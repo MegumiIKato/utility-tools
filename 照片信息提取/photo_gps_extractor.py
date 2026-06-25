@@ -153,6 +153,62 @@ def process_images(folder, output_file, folder_name, status_callback, progress_c
         status_callback(f"保存文件时出错: {str(e)}")
 
 
+def rename_photos(folder, status_callback, progress_callback):
+    """将所有子文件夹内的照片重命名为'文件夹后五位-序号'格式"""
+    IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.tiff', '.heic')
+
+    # 收集所有子文件夹及其照片
+    subfolders = []
+    for entry in os.scandir(folder):
+        if entry.is_dir():
+            photos = []
+            for f in os.scandir(entry.path):
+                if f.is_file() and f.name.lower().endswith(IMAGE_EXTENSIONS):
+                    photos.append(f.path)
+            if photos:
+                subfolders.append((entry.name, photos))
+
+    if not subfolders:
+        status_callback("所选目录下未找到包含照片的子文件夹")
+        return 0
+
+    total_renamed = 0
+    total_folders = len(subfolders)
+
+    for folder_idx, (folder_name, photos) in enumerate(subfolders):
+        # 提取文件夹名称后五位
+        suffix = folder_name[-5:] if len(folder_name) >= 5 else folder_name
+        status_callback(f"正在处理文件夹: {folder_name} ({folder_idx + 1}/{total_folders})")
+
+        # 按文件名排序，保证顺序一致
+        photos.sort()
+
+        for i, photo_path in enumerate(photos, start=1):
+            ext = os.path.splitext(photo_path)[1]
+            new_name = f"{suffix}-{i}{ext}"
+            new_path = os.path.join(os.path.dirname(photo_path), new_name)
+
+            # 避免重名冲突（目标文件已存在且不是自身）
+            if os.path.exists(new_path) and os.path.abspath(new_path) != os.path.abspath(photo_path):
+                # 尝试递增序号
+                seq = i + 1
+                while os.path.exists(os.path.join(os.path.dirname(photo_path), f"{suffix}-{seq}{ext}")):
+                    seq += 1
+                new_name = f"{suffix}-{seq}{ext}"
+                new_path = os.path.join(os.path.dirname(photo_path), new_name)
+
+            try:
+                os.rename(photo_path, new_path)
+                total_renamed += 1
+            except Exception as e:
+                status_callback(f"重命名失败: {os.path.basename(photo_path)} -> {e}")
+
+        progress_callback((folder_idx + 1) / total_folders * 100)
+
+    status_callback(f"重命名完成！共处理 {total_renamed} 张照片")
+    return total_renamed
+
+
 def process_all_images(folder, status_callback, progress_callback):
     """处理所有照片文件夹并导出两个CSV文件"""
     folder_configs = [
@@ -220,33 +276,49 @@ class PhotoGPSExtractor:
     def __init__(self, root):
         self.root = root
         self.root.title("照片GPS信息提取工具")
-        self.root.geometry("550x280")
-        self.root.minsize(450, 240)
+        self.root.geometry("550x380")
+        self.root.minsize(450, 340)
         
         self.folder_path = tk.StringVar()
-        
+        self.rename_path = tk.StringVar()
+
         self.create_widgets()
     
     def create_widgets(self):
         main_frame = ttk.Frame(self.root, padding="20")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        ttk.Label(main_frame, text="选择文件夹:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+
+        # GPS提取区域
+        ttk.Label(main_frame, text="GPS提取 - 选择文件夹:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
         folder_frame = ttk.Frame(main_frame)
         folder_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         ttk.Entry(folder_frame, textvariable=self.folder_path).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
         ttk.Button(folder_frame, text="浏览...", command=self.browse_folder).grid(row=0, column=1)
         folder_frame.columnconfigure(0, weight=1)
-        
+
+        ttk.Button(main_frame, text="开始提取", command=self.start_processing).grid(row=2, column=0, pady=(0, 15), sticky=tk.W)
+
+        # 分隔线
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
+
+        # 重命名区域
+        ttk.Label(main_frame, text="照片重命名 - 选择文件夹:").grid(row=4, column=0, sticky=tk.W, pady=(0, 5))
+        rename_frame = ttk.Frame(main_frame)
+        rename_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        ttk.Entry(rename_frame, textvariable=self.rename_path).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
+        ttk.Button(rename_frame, text="浏览...", command=self.browse_rename_folder).grid(row=0, column=1)
+        rename_frame.columnconfigure(0, weight=1)
+
+        ttk.Button(main_frame, text="照片重命名", command=self.start_rename).grid(row=6, column=0, pady=(0, 10), sticky=tk.W)
+
+        # 状态栏
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(main_frame, variable=self.progress_var, maximum=100)
-        self.progress_bar.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        
-        self.status_label = ttk.Label(main_frame, text="请选择包含'人工举证照片'和'无人机举证照片'文件夹的目录", wraplength=500)
-        self.status_label.grid(row=3, column=0, sticky=tk.W, pady=(0, 10))
-        
-        ttk.Button(main_frame, text="开始提取", command=self.start_processing).grid(row=4, column=0, pady=(10, 0))
-        
+        self.progress_bar.grid(row=7, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        self.status_label = ttk.Label(main_frame, text="就绪", wraplength=500)
+        self.status_label.grid(row=8, column=0, sticky=tk.W)
+
         main_frame.columnconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
@@ -255,6 +327,11 @@ class PhotoGPSExtractor:
         folder = filedialog.askdirectory(title="选择包含照片文件夹的目录")
         if folder:
             self.folder_path.set(folder)
+
+    def browse_rename_folder(self):
+        folder = filedialog.askdirectory(title="选择包含子文件夹的照片目录")
+        if folder:
+            self.rename_path.set(folder)
     
     def update_status(self, message):
         self.status_label.config(text=message)
@@ -282,6 +359,34 @@ class PhotoGPSExtractor:
                 self.root.after(0, lambda: messagebox.showwarning("警告", "未找到任何照片文件夹"))
         
         thread = threading.Thread(target=run_processing)
+        thread.daemon = True
+        thread.start()
+
+    def start_rename(self):
+        folder = self.rename_path.get()
+
+        if not folder:
+            messagebox.showwarning("警告", "请选择重命名文件夹")
+            return
+
+        confirm = messagebox.askyesno(
+            "确认重命名",
+            "将把所选目录下所有子文件夹内的照片重命名为'文件夹后五位-序号'格式。\n\n此操作不可撤销，是否继续？"
+        )
+        if not confirm:
+            return
+
+        def run_rename():
+            try:
+                total = rename_photos(folder, self.update_status, self.update_progress)
+                if total > 0:
+                    self.root.after(0, lambda: messagebox.showinfo("完成", f"重命名完成！共处理 {total} 张照片"))
+                else:
+                    self.root.after(0, lambda: messagebox.showwarning("警告", "未找到包含照片的子文件夹"))
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("错误", f"重命名过程出错:\n{str(e)}"))
+
+        thread = threading.Thread(target=run_rename)
         thread.daemon = True
         thread.start()
 
